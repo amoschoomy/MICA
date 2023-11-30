@@ -1,14 +1,14 @@
 import numpy as np
 import torch
 from sklearn import metrics
-from sparsemax import Sparsemax
+
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-train_data=np.load("lung_train_data.npy")
-train_label=np.load("lung_train_label.npy")
-test_data=np.load("lung_test_data.npy")
-test_label=np.load("lung_test_label.npy")
+train_data = np.load("lung_train_data.npy")
+train_label = np.load("lung_train_label.npy")
+test_data = np.load("lung_test_data.npy")
+test_label = np.load("lung_test_label.npy")
 all_data = []
 all_label = []
 for p in train_data:
@@ -82,12 +82,13 @@ def caculateAUC(AUC_outs, AUC_labels):
     return auc, aupr
 
 
-class MICA(nn.Module):
+#python3  train_and_test.py
+class MDPR(nn.Module):
 
     def __init__(self, ):
-        super(MICA, self).__init__()
+        super(MDPR, self).__init__()
 
-        self.embedding = nn.Embedding(40, 50)
+        self.embedding = nn.Embedding(40, 50)  # .frm_pretrained(torch.load("embedding_token"))
 
         self.conv1 = nn.Conv2d(1, 3, kernel_size=(5, 50), stride=1)
         nn.init.xavier_normal_(self.conv1.weight, gain=1)
@@ -126,13 +127,14 @@ class MICA(nn.Module):
         self.W_k = nn.Linear(1, 1)
         self.W_v = nn.Linear(1, 1)
         self.softmax = nn.Softmax(dim=-1)
-        self.dropout = nn.Dropout(0.75)  # best=0.3
+        self.dropout = nn.Dropout(0.75)
         self.max = nn.MaxPool2d(kernel_size=(2, 1), stride=2)
 
     def forward(self, input):
+        ap = input
         input = self.embedding(input)
         input = input.reshape(input.shape[0] * input.shape[1], 1, input.shape[2], input.shape[3])
-        # food_conv1 = self.maxpool1(self.dropout(self.BatchNorm(self.relu(self.food_conv1(input)))).squeeze(3))
+
         conv1 = self.conv1(input)
         conv1 = self.relu(conv1)
         conv1 = self.BatchNorm1(conv1)
@@ -158,28 +160,32 @@ class MICA(nn.Module):
 
         all1 = self.linear1(all)
         all1 = all1.reshape(-1, 100)
-        all1,_ = torch.sort(all1)
+        all1, ad = torch.sort(all1)
+        a2 = all1.reshape(-1, 100)
         all1 = all1.reshape(-1, 100, 1)
 
         q = self.W_q(all1)
         k = self.W_k(all1)
         v = self.W_v(all1)
 
+
         attention_scores = torch.matmul(q, k.transpose(1, 2))
         attention_scores = attention_scores / torch.sqrt(torch.tensor(100))
+
 
 
         attention_scores = self.softmax(attention_scores)
 
 
         all1 = torch.matmul(attention_scores, v)
-
+        a = all1.reshape(-1, 100).cpu().detach().numpy()
         all1 = self.linear2(all1.reshape(-1, 100))
+        weights = self.linear2.weight.data
+        biases = self.linear2.bias.data
+        return all1, a, a2, weights, biases, ap, ad
 
-        return all1
 
-
-model = MICA()
+model = MDPR()
 model = model.cuda()
 # optimizer = torch.optim.SGD([{'params': model.parameters(), 'initial_lr': 0.00001}], lr=0.00001,
 #                                 momentum=0.99,
@@ -188,15 +194,24 @@ optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0001, weight_decay
 train_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[14000], gamma=0.1)
 # optimizer = torch.optim.Adam(params=model.parameters(),lr=0.0001)
 loss = torch.nn.CrossEntropyLoss()
-for i in range(14000):  # 4000
+for i in range(14000):
     test_acc = 0.0
     train_acc = 0.0
     model.train()
     for data in dataloader_train:
         input, label = data
+
         input = input.cuda()
         label = label.cuda()
-        out = model(input)
+        out, a_f, a_i, w, b, ap, ad = model(input)
+        if (i + 1) % 100 == 0:
+            np.save("a_f", a_f)
+            np.save("a_y", label.cpu().detach().numpy())
+            np.save("a_i", a_i.cpu().detach().numpy())
+            np.save("a_w", w.cpu().detach().numpy())
+            np.save("a_b", b.cpu().detach().numpy())
+            np.save("a_p", ap.cpu().detach().numpy())
+            np.save("a_d", ad.cpu().detach().numpy())
         out = out.cuda()
         optimizer.zero_grad()
         result_loss = loss(out, label)
@@ -221,7 +236,7 @@ for i in range(14000):  # 4000
                 input, label = data
                 input = input.cuda()
                 label = label.cuda()
-                out = model(input)
+                out, _, t_a_i, tw, tb, tp, td = model(input)
                 out = out.cuda()
 
                 result_loss = loss(out, label)
@@ -233,4 +248,4 @@ for i in range(14000):  # 4000
                 test_acc = test_acc + ((out.argmax(1) == label).sum())
 
         auc_number, aupr = caculateAUC(auc_out, auc_label)
-        print("accuracy:{},auc:{}".format(float(test_acc / my_test.__len__()), auc_number))
+        print("acc:{},auc:{}".format(float(test_acc / my_test.__len__()), auc_number))
