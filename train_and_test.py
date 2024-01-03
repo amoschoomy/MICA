@@ -83,10 +83,10 @@ def caculateAUC(AUC_outs, AUC_labels):
 
 
 #python3  train_and_test.py
-class MDPR(nn.Module):
+class MICA(nn.Module):
 
     def __init__(self, ):
-        super(MDPR, self).__init__()
+        super(MICA, self).__init__()
 
         self.embedding = nn.Embedding(40, 50)  # .frm_pretrained(torch.load("embedding_token"))
 
@@ -185,7 +185,7 @@ class MDPR(nn.Module):
         return all1, a, a2, weights, biases, ap, ad
 
 
-model = MDPR()
+model = MICA()
 model = model.cuda()
 # optimizer = torch.optim.SGD([{'params': model.parameters(), 'initial_lr': 0.00001}], lr=0.00001,
 #                                 momentum=0.99,
