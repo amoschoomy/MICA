@@ -5,10 +5,10 @@ from sklearn import metrics
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-train_data = np.load("lung_train_data.npy")
-train_label = np.load("lung_train_label.npy")
-test_data = np.load("lung_test_data.npy")
-test_label = np.load("lung_test_label.npy")
+train_data = np.load("/scratch/project/tcr_ml/MICA/data/data/Lung/lung_train_data.npy")
+train_label = np.load("/scratch/project/tcr_ml/MICA/data/data/Lung/lung_train_label.npy")
+test_data = np.load("/scratch/project/tcr_ml/MICA/data/data/Lung/lung_test_data.npy")
+test_label = np.load("/scratch/project/tcr_ml/MICA/data/data/Lung/lung_test_label.npy")
 all_data = []
 all_label = []
 for p in train_data:
@@ -185,26 +185,16 @@ class MICA(nn.Module):
         return all1, a, a2, weights, biases, ap, ad
 
 
-model = MICA()
-model = model.cuda()
-# optimizer = torch.optim.SGD([{'params': model.parameters(), 'initial_lr': 0.00001}], lr=0.00001,
-#                                 momentum=0.99,
-#                                 weight_decay=5e-3)
-optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0001, weight_decay=5e-3)
-train_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[14000], gamma=0.1)
-# optimizer = torch.optim.Adam(params=model.parameters(),lr=0.0001)
-loss = torch.nn.CrossEntropyLoss()
-for i in range(14000):
-    test_acc = 0.0
+def train_one_epoch(model, dataloader_train, optimizer, loss_fn, epoch, my_train):
     train_acc = 0.0
     model.train()
     for data in dataloader_train:
         input, label = data
-
         input = input.cuda()
         label = label.cuda()
+        
         out, a_f, a_i, w, b, ap, ad = model(input)
-        if (i + 1) % 100 == 0:
+        if (epoch + 1) % 100 == 0:
             np.save("a_f", a_f)
             np.save("a_y", label.cpu().detach().numpy())
             np.save("a_i", a_i.cpu().detach().numpy())
@@ -212,40 +202,50 @@ for i in range(14000):
             np.save("a_b", b.cpu().detach().numpy())
             np.save("a_p", ap.cpu().detach().numpy())
             np.save("a_d", ad.cpu().detach().numpy())
-        out = out.cuda()
+        
         optimizer.zero_grad()
-        result_loss = loss(out, label)
-
-        result_loss = result_loss.cuda()
+        result_loss = loss_fn(out, label)
         result_loss.backward()
         optimizer.step()
-        train_acc = train_acc + ((out.argmax(1) == label).sum())
-    # print(i)
-    # print("train")
+        train_acc += (out.argmax(1) == label).sum()
+    
+    return float(train_acc / my_train.__len__())
+
+def evaluate(model, dataloader_test, loss_fn, my_test):
+    model.eval()
+    auc_label = []
+    auc_out = []
+    test_acc = 0.0
+    
+    with torch.no_grad():
+        for data in dataloader_test:
+            input, label = data
+            input = input.cuda()
+            label = label.cuda()
+            out, _, t_a_i, tw, tb, tp, td = model(input)
+            
+            result_loss = loss_fn(out, label)
+            
+            auc_label.append(label.cpu().numpy())
+            auc_out.append(out.cpu())
+            test_acc += (out.argmax(1) == label).sum()
+    
+    auc_number, aupr = caculateAUC(auc_out, auc_label)
+    return float(test_acc / my_test.__len__()), auc_number
+
+# Model initialization and training setup
+model = MICA()
+model = model.cuda()
+optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0001, weight_decay=5e-3)
+train_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[14000], gamma=0.1)
+loss_fn = torch.nn.CrossEntropyLoss()
+
+# Main training loop
+for epoch in range(14000):
+    train_acc = train_one_epoch(model, dataloader_train, optimizer, loss_fn, epoch, my_train)
     train_scheduler.step()
-    # print(float(train_acc / my_train.__len__()))
-    if (i + 1) % 500 == 0:
-        print(float(train_acc / my_train.__len__()))
-        model.eval()
-        auc_label = []
-        auc_out = []
-        test_acc = 0.0
-        with torch.no_grad():
-
-            for data in dataloader_test:
-                input, label = data
-                input = input.cuda()
-                label = label.cuda()
-                out, _, t_a_i, tw, tb, tp, td = model(input)
-                out = out.cuda()
-
-                result_loss = loss(out, label)
-                result_loss = result_loss.cuda()
-
-                auc_label.append(label.cpu().numpy())
-                auc_out.append(out.cpu())
-
-                test_acc = test_acc + ((out.argmax(1) == label).sum())
-
-        auc_number, aupr = caculateAUC(auc_out, auc_label)
-        print("acc:{},auc:{}".format(float(test_acc / my_test.__len__()), auc_number))
+    
+    if (epoch + 1) % 500 == 0:
+        print(f"Training accuracy: {train_acc}")
+        test_acc, auc_number = evaluate(model, dataloader_test, loss_fn, my_test)
+        print(f"Test accuracy: {test_acc}, AUC: {auc_number}")
