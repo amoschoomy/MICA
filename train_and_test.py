@@ -239,6 +239,7 @@ model = model.cuda()
 optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.0001, weight_decay=5e-3)
 train_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[14000], gamma=0.1)
 loss_fn = torch.nn.CrossEntropyLoss()
+best_acc = 0.0
 
 # Main training loop
 for epoch in range(14000):
@@ -249,3 +250,6 @@ for epoch in range(14000):
         print(f"Training accuracy: {train_acc}")
         test_acc, auc_number = evaluate(model, dataloader_test, loss_fn, my_test)
         print(f"Test accuracy: {test_acc}, AUC: {auc_number}")
+        if test_acc > best_acc:
+            best_acc = test_acc
+            torch.save(model.state_dict(), "best_model.pth")
